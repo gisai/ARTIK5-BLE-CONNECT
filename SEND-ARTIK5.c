@@ -21,7 +21,9 @@
 static artik_bluetooth_module *bt;
 static artik_loop_module *loop_main;
 
-static char remote_address[]="00:0B:57:0B:DE:21";
+//static char remote_address[]="00:0B:57:0B:DE:21";
+static char remote_address[]="00:0B:57:0B:E2:62";
+
 
 
 
@@ -157,8 +159,10 @@ int main(void){
 
 
 
-	    loop_main->add_signal_watch(SIGINT, uninit, NULL, NULL);
-	    loop_main->run();
+	    ///loop_main->add_signal_watch(SIGINT, uninit, NULL, NULL);
+	    //loop_main->run();
+
+	    goto loop_quit;
 
 	 spp_quit:
 	     bt->spp_unregister_profile();
