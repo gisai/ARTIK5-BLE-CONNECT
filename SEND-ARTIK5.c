@@ -12,7 +12,8 @@
 #include <artik_module.h>
 #include <artik_loop.h>
 #include <artik_bluetooth.h>
-#include "image.h"
+//#include "image.h"
+#include "readfile.h"
 
 #define SPP_SERVICE "4880c12c-fdcb-4077-8920-a450d7f9b907"
 #define SPP_DATA_CHAR "fec26ec4-6d71-4442-9f81-55bc21d658d6"
@@ -21,7 +22,10 @@
 static artik_bluetooth_module *bt;
 static artik_loop_module *loop_main;
 
-static char remote_address[]="00:0B:57:0B:DE:21";
+//static char remote_address[]="00:0B:57:0B:DE:21";
+static char remote_address[]="00:0B:57:0B:E2:62";
+
+unsigned char image[Image_Size];
 
 
 
@@ -97,6 +101,10 @@ int main(void){
 	 int image_pointer=0;
 
 
+	 //READ FILE
+	if(readFile(&image[0])){
+		return 0;
+	}
 
 
 
@@ -157,8 +165,10 @@ int main(void){
 
 
 
-	    loop_main->add_signal_watch(SIGINT, uninit, NULL, NULL);
-	    loop_main->run();
+	    ///loop_main->add_signal_watch(SIGINT, uninit, NULL, NULL);
+	    //loop_main->run();
+
+	    goto loop_quit;
 
 	 spp_quit:
 	     bt->spp_unregister_profile();
