@@ -18,6 +18,8 @@
 #define SPP_SERVICE "4880c12c-fdcb-4077-8920-a450d7f9b907"
 #define SPP_DATA_CHAR "fec26ec4-6d71-4442-9f81-55bc21d658d6"
 
+#define tam_paq 244
+//#define tam_paq 20
 
 static artik_bluetooth_module *bt;
 static artik_loop_module *loop_main;
@@ -97,7 +99,7 @@ int main(void){
 	 unsigned char *b = NULL;
 	 int i, len;
 	 int timeout_id = 0;
-	 unsigned char byte[20];
+	 unsigned char byte[tam_paq];
 	 int image_pointer=0;
 
 
@@ -105,7 +107,6 @@ int main(void){
 	if(readFile(&image[0])){
 		return 0;
 	}
-
 
 
 	 if (!artik_is_module_available(ARTIK_MODULE_BLUETOOTH)) {
@@ -149,13 +150,13 @@ int main(void){
 
 	    while(image_pointer < Image_Size){
 
-	    	for(i=image_pointer;i<image_pointer+20;i++){
+	    	for(i=image_pointer;i<image_pointer+tam_paq;i++){
 	    		byte[i-image_pointer]=image[i];
 	    	}
 	    	bt->gatt_char_write_value(remote_address, SPP_SERVICE, SPP_DATA_CHAR,
-	    			byte, 20);
+	    			byte, tam_paq);
 
-	    	image_pointer+=20;
+	    	image_pointer+=tam_paq;
 	    }
 
 	    //loop_main->add_timeout_callback(&timeout_id, 30000, notifyoff, (void*)loop_main);
