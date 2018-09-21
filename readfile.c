@@ -12,7 +12,7 @@
 
 
 
-static char path[] = "/root/node/artik-GW-api/Uploads/image.txt";
+static char path[] = "/root/PROGRAMS/artik-GW-api/Uploads/image.txt";
 
 /***************************************************************************************************
  * Function Definitions
