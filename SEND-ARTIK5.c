@@ -138,23 +138,27 @@ int main(int argc, char* argv[]){
 		fprintf(stdout, "<SPP>: SPP register error!\n");
 		goto spp_quit;
 	}
-	fprintf(stdout, "<SPP>: SPP register profile success!\n");
+	//fprintf(stdout, "<SPP>: SPP register profile success!\n");
 
 	ret = set_callback();
 	if (ret != S_OK) {
 		fprintf(stdout, "<SPP>: SPP set callback error!\n");
 		goto spp_quit;
 	}
-	fprintf(stdout, "<SPP>: SPP set callback success!\n");
+	//fprintf(stdout, "<SPP>: SPP set callback success!\n");
 
 	ret = bt->start_bond(argv[1]);
-	if (ret != S_OK)
+	if (ret != S_OK){
+		fprintf(stdout, "<ERROR>: Paired Failed (DEVICE NOT FOUND)!\n");
 		goto spp_quit;
+	}
 	fprintf(stdout, "<SPP>: SPP paired success!\n");
 
 	ret = bt->connect(argv[1]);
-	if (ret != S_OK)
+	if (ret != S_OK){
+		fprintf(stdout, "<ERROR>: Connection failed!\n");
 		goto spp_quit;
+	}
 
 	bt->gatt_start_notify(argv[1], SPP_SERVICE, SPP_DATA_CHAR);
 
@@ -195,7 +199,7 @@ int main(int argc, char* argv[]){
 		bt->unset_callback(BT_EVENT_SPP_RELEASE);
 		bt->unset_callback(BT_EVENT_SPP_DISCONNECT);
 		bt->disconnect(argv[1]);
-		fprintf(stdout, "<SPP>: SPP quit!\n");
+		//fprintf(stdout, "<SPP>: SPP quit!\n");
 	loop_quit:
 		if (bt) {
 			bt->deinit();
@@ -203,7 +207,7 @@ int main(int argc, char* argv[]){
 		}
 		if (loop_main)
 			artik_release_api_module(loop_main);
-		fprintf(stdout, "<SPP>: Loop quit!\n");
-	return S_OK;
+		//fprintf(stdout, "<SPP>: Loop quit!\n");
+	return ret;
 
 }
