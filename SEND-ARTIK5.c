@@ -1,3 +1,9 @@
+/***********************************************************************************************//**
+ * \file   SEND-ARTIK5.c
+ * \brief  Connect with display device and image transmission
+ ***************************************************************************************************
+ * 
+ **************************************************************************************************/
 
 
 #include <stdio.h>
@@ -12,202 +18,215 @@
 #include <artik_module.h>
 #include <artik_loop.h>
 #include <artik_bluetooth.h>
-//#include "image.h"
 #include "readfile.h"
-
-#define SPP_SERVICE "4880c12c-fdcb-4077-8920-a450d7f9b907"
-#define SPP_DATA_CHAR "fec26ec4-6d71-4442-9f81-55bc21d658d6"
+//#include "image.h"
 
 #define tam_paq 244
-//#define tam_paq 20
+#define SPP_SERVICE "4880c12c-fdcb-4077-8920-a450d7f9b907"
+#define SPP_CHARACTERISTIC "fec26ec4-6d71-4442-9f81-55bc21d658d6"
+#define SCAN_TIME_MILLISECONDS (30*1000)
+#define CONNECT_TIME_MILLISECONDS (25*1000)
 
 static artik_bluetooth_module *bt;
-static artik_loop_module *loop_main;
-
-//static char remote_address[]="00:0B:57:0B:DE:21";
-char remote_address[]="00:0B:57:0B:E2:62";
+static artik_loop_module *loop;
+static char addr[18] = "";
+static int scan_timeout_id;
+static int connect_timeout_id;
 
 unsigned char image[Image_Size];
 
-
-
-static int uninit(void *user_data)
+/**
+ * Callback funtion to scan Timeout
+ * @param user_data
+ */
+static void scan_timeout_callback(void *user_data)
 {
-	fprintf(stdout, "<SPP>: Process cancel\n");
-	loop_main->quit();
+    fprintf(stderr, "> Device not found. 30s Timeout exceeded.\n");
+    bt->stop_scan();
+    bt->unset_callback(BT_EVENT_SCAN);
+    loop->remove_timeout_callback(scan_timeout_id);
+    loop->quit();
+}
+
+/**
+ * Callback funtion to connect timeout
+ * @param user_data
+ */
+static void connect_timeout_callback(void *user_data)
+{
+    fprintf(stderr, "> Can't connect to the device. 25s Timeout exceeded. Try again?\n");
+    bt->stop_scan();
+    bt->unset_callback(BT_EVENT_CONNECT);
+    loop->remove_timeout_callback(connect_timeout_id);
+    loop->quit();
+}
+
+/**
+ * Callback funtion to scan procedures
+ * @param event
+ * @param data
+ * @param user_data
+ */
+static void on_scan(artik_bt_event event, void *data, void *user_data)
+{
+	artik_bt_device *devices = (artik_bt_device *) data;
+	//Compare found devices with target
+	if (!strncmp(devices->remote_address, addr, 18)) {
+		fprintf(stdout, "> Device found: [%s]\n", devices->remote_address);
+		//Disable scan timeout
+		loop->remove_timeout_callback(scan_timeout_id);
+		//Disable scan
+		bt->stop_scan();
+		//Set connect timeout
+		loop->add_timeout_callback(&connect_timeout_id, CONNECT_TIME_MILLISECONDS, connect_timeout_callback, NULL);
+		//Try to connect
+		bt->connect(addr);
+	}
+}
+
+/**
+ * Callback funtion to connection procedures
+ * @param event
+ * @param data
+ * @param user_data
+ */
+static void on_connect(artik_bt_event event, void *data, void *user_data)
+{
+	artik_bt_device d = *(artik_bt_device *)data;
+	//Check if properly connected
+	if (d.is_connected){ 
+		//Device connected
+		fprintf(stdout, "> [%s] is connected\n", d.remote_address);
+		//Disable connect timeout
+		loop->remove_timeout_callback(connect_timeout_id);
+	}else {
+		fprintf(stdout, "> [%s] is disconnected\n", d.remote_address);
+		//Unexpected disconnection. Abort
+		loop->quit();
+	}
+}
+
+/**
+ * Callback funtion to on service resolve procedures
+ * @param event
+ * @param data
+ * @param user_data
+ */
+static void on_service_resolved(artik_bt_event event, void *data, void *user_data)
+{
+	//Once connection stablished, services are resolved
+	artik_bt_gatt_char_properties prop1;
+	unsigned char *b = NULL;
+	int i, len;
+	int image_pointer=0;
+	unsigned char byte[tam_paq];
+	
+	fprintf(stdout, "> Image Loading...\n");
+	//Read image file before trying to notify device
+	if(readFile(&image[0])){
+		//Abort if error loading image data
+		fprintf(stderr, "> Error loading image. Aborting...\n");
+		bt->disconnect(addr);
+		loop->quit();
+	}
+
+	//Retrieve service characteristics 
+	if (bt->gatt_get_char_properties(addr, SPP_SERVICE, SPP_CHARACTERISTIC, &prop1) == 0) {
+		//If notify property found, start notifying
+		if (prop1 & BT_GATT_CHAR_PROPERTY_NOTIFY) {
+			fprintf(stdout, "> Notifying device...\n");
+			bt->gatt_start_notify(addr, SPP_SERVICE, SPP_CHARACTERISTIC);
+			//Start transmision
+			fprintf(stdout, "> Start transmission\n");
+			while(image_pointer < Image_Size){
+				//Build datagram of tam_paq to send
+				for(i=image_pointer;i<image_pointer+tam_paq;i++){
+					byte[i-image_pointer]=image[i];
+				}
+				//Send datagram
+				bt->gatt_char_write_value(addr, SPP_SERVICE, SPP_CHARACTERISTIC, byte, tam_paq);
+				//Increase index
+				image_pointer+=tam_paq;
+			}
+			//Stop notifying, device starts screen update
+			bt->gatt_stop_notify(addr, SPP_SERVICE, SPP_CHARACTERISTIC);
+			fprintf(stdout,"> Transmission finished!\n");
+
+			loop->quit();
+		}
+	}
+}
+
+/**
+ * Set callbacks to BT events
+ * Scan -> Connect -> Service_resolved
+ */
+static void set_user_callbacks(void)
+{
+	bt->set_callback(BT_EVENT_SCAN, on_scan, NULL);
+	bt->set_callback(BT_EVENT_CONNECT, on_connect, NULL);
+	bt->set_callback(BT_EVENT_SERVICE_RESOLVED, on_service_resolved, NULL);
+}
+
+/**
+ * SIGINT Aware callback
+ * @param user_data
+ * @return true
+ */
+static int on_signal(void *user_data)
+{
+	fprintf(stderr, "> SIGINT! - Aborting...\n");
+	loop->quit();
 	return true;
 }
 
-void callback_on_spp_connect(artik_bt_event event,
-	void *data, void *user_data)
+/**
+ * Main process
+ *
+ * Usage: -t <BTADDR>
+ * 
+ * @param
+ * @param
+ * @return
+ */
+int main(int argc, char *argv[])
 {
-	fprintf(stdout, "<SPP>: %s\n", __func__);
-}
-void callback_on_spp_release(artik_bt_event event,
-	void *data, void *user_data)
-{
-	fprintf(stdout, "<SPP>: %s\n", __func__);
-}
-void callback_on_spp_disconnect(artik_bt_event event,
-	void *data, void *user_data)
-{
-	fprintf(stdout, "<SPP>: %s\n", __func__);
-}
-
-static artik_error set_callback(void)
-{
-	artik_error ret = S_OK;
-	artik_bt_callback_property callback_property[] = {
-		{BT_EVENT_SPP_CONNECT, callback_on_spp_connect, NULL},
-		{BT_EVENT_SPP_RELEASE, callback_on_spp_release, NULL},
-		{BT_EVENT_SPP_DISCONNECT, callback_on_spp_disconnect, NULL},
-	};
-	ret = bt->set_callbacks(callback_property, 4);
-	return ret;
-}
-
-static artik_error spp_profile_register(void)
-{
-	artik_error ret = S_OK;
-	artik_bt_spp_profile_option profile_option;
-	profile_option.name = "Artik SPP Loopback";
-	profile_option.service = "spp char loopback";
-	profile_option.role = "client";
-	profile_option.channel = 22;
-	profile_option.PSM = 3;
-	profile_option.require_authentication = 1;
-	profile_option.auto_connect = 1;
-	profile_option.version = 10;
-	profile_option.features = 20;
-	ret = bt->spp_register_profile(&profile_option);
-	return ret;
-}
-
-void notifyoff(){
-	bt->gatt_stop_notify(remote_address, SPP_SERVICE, SPP_DATA_CHAR);
-	bt->disconnect(remote_address);
-	bt->deinit();
-	fprintf(stderr, "\nNOTIFY OFF\n");
-}
-
-
-//USAGE: SEND 
-int main(int argc, char* argv[]){
-
-	if(argc !=2){
-		fprintf(stdout, "WRONG CALL - Aborting...");
-		return -1;
-	}
-	//Check if MAC address is len 17
-	if(strlen(argv[1]) != 17){
-		fprintf(stdout, "WRONG MAC FORMAT - Aborting...");
-		return -1;
+	//Locate -t
+	int opt;
+	while ((opt = getopt(argc, argv, "t:")) != -1) {
+		switch (opt) {
+		case 't':
+			//Save destination BTADDR
+			strncpy(addr, optarg, 18);
+			fprintf(stdout, "> target address: %s\n", addr);
+			break;
+		default:
+			fprintf(stderr, ">Call error. Usage: -t <target BDADDR>\n");
+			return -1;
+		}
 	}
 
-	artik_error ret = S_OK;
-
-
-	unsigned char *b = NULL;
-	int i, len;
-	int timeout_id = 0;
-	unsigned char byte[tam_paq];
-	int image_pointer=0;
-
-
-	 //READ FILE
-	if(readFile(&image[0])){
-		return 0;
-	}
-
-
-	if (!artik_is_module_available(ARTIK_MODULE_BLUETOOTH)) {
-		fprintf(stderr, "<SPP>: Bluetooth module not available!\n");
-		goto loop_quit;
-	}
-
+	//Initialize
+	int signal_id;
 	bt = (artik_bluetooth_module *)artik_request_api_module("bluetooth");
-	loop_main = (artik_loop_module *)artik_request_api_module("loop");
-
-	if (!bt || !loop_main)
-		goto loop_quit;
-
+	loop = (artik_loop_module *)artik_request_api_module("loop");
 	bt->init();
+	set_user_callbacks();
 
-	ret = spp_profile_register();
-	if (ret != S_OK) {
-		fprintf(stdout, "<SPP>: SPP register error!\n");
-		goto spp_quit;
-	}
-	//fprintf(stdout, "<SPP>: SPP register profile success!\n");
-
-	ret = set_callback();
-	if (ret != S_OK) {
-		fprintf(stdout, "<SPP>: SPP set callback error!\n");
-		goto spp_quit;
-	}
-	//fprintf(stdout, "<SPP>: SPP set callback success!\n");
-
-	ret = bt->start_bond(argv[1]);
-	if (ret != S_OK){
-		fprintf(stdout, "<ERROR>: Paired Failed (DEVICE NOT FOUND)!\n");
-		goto spp_quit;
-	}
-	fprintf(stdout, "<SPP>: SPP paired success!\n");
-
-	ret = bt->connect(argv[1]);
-	if (ret != S_OK){
-		fprintf(stdout, "<ERROR>: Connection failed!\n");
-		goto spp_quit;
-	}
-
-	bt->gatt_start_notify(argv[1], SPP_SERVICE, SPP_DATA_CHAR);
-
-
-	while(image_pointer < Image_Size){
-
-		for(i=image_pointer;i<image_pointer+tam_paq;i++){
-			byte[i-image_pointer]=image[i];
-		}
-		bt->gatt_char_write_value(argv[1], SPP_SERVICE, SPP_DATA_CHAR,
-			byte, tam_paq);
-
-		image_pointer+=tam_paq;
-	}
-
-	    //loop_main->add_timeout_callback(&timeout_id, 30000, notifyoff, (void*)loop_main);
-
-	//notifyoff();
-
-
-	bt->gatt_stop_notify(argv[1], SPP_SERVICE, SPP_DATA_CHAR);
-	bt->disconnect(argv[1]);
+	//Start scanning
+	fprintf(stdout, "> Start scan\n");
+	bt->start_scan();
+	loop->add_signal_watch(SIGINT, on_signal, NULL, &signal_id);
+	loop->add_timeout_callback(&scan_timeout_id, SCAN_TIME_MILLISECONDS, scan_timeout_callback, NULL);
+	//Background loop starts
+	loop->run();
+	//loop->quit() resumes here
+	loop->remove_signal_watch(signal_id);
+	bt->gatt_stop_notify(addr, SPP_SERVICE, SPP_CHARACTERISTIC);
+	bt->disconnect(addr);
 	bt->deinit();
-	fprintf(stderr, "\nNOTIFY OFF\n");
+	artik_release_api_module(bt);
+	artik_release_api_module(loop);
 
-
-
-
-	    ///loop_main->add_signal_watch(SIGINT, uninit, NULL, NULL);
-	    //loop_main->run();
-
-	goto loop_quit;
-
-	spp_quit:
-		bt->spp_unregister_profile();
-		bt->unset_callback(BT_EVENT_SCAN);
-		bt->unset_callback(BT_EVENT_SPP_CONNECT);
-		bt->unset_callback(BT_EVENT_SPP_RELEASE);
-		bt->unset_callback(BT_EVENT_SPP_DISCONNECT);
-		bt->disconnect(argv[1]);
-		//fprintf(stdout, "<SPP>: SPP quit!\n");
-	loop_quit:
-		if (bt) {
-			bt->deinit();
-			artik_release_api_module(bt);
-		}
-		if (loop_main)
-			artik_release_api_module(loop_main);
-		//fprintf(stdout, "<SPP>: Loop quit!\n");
-	return ret;
-
+	return 0;
 }
